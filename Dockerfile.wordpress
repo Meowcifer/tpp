@@ -28,10 +28,7 @@ RUN set -eux; \
     pecl install --configureoptions 'enable-redis-igbinary="yes"' redis; \
     docker-php-ext-enable redis; \
     \
-    # Install LZ4 and Zstd with specific configurations
-    pecl install lz4-0.4.3; \
-    docker-php-ext-enable lz4; \
-    \
+    # Install Zstd extension
     pecl install zstd; \
     docker-php-ext-enable zstd; \
     \
@@ -45,7 +42,7 @@ RUN set -eux; \
     apk del .build-deps; \
     \
     # Verify installations
-    php -m | grep -Ei 'redis|lz4|zstd|igbinary|opcache|zip'
+    php -m | grep -Ei 'redis|zstd|igbinary|opcache|zip'
 
 # Configure OPcache for production
 RUN { \

@@ -157,7 +157,7 @@ services:
         define('WP_REDIS_DISABLED', false);
         define('WP_CACHE_KEY_SALT', 'the-town-project:');
         define('WP_REDIS_PREFIX', 'wp:');
-        define('WP_REDIS_COMPRESSION', 'lz4');
+        define('WP_REDIS_COMPRESSION', 'zstd');
         define('WP_REDIS_RETRY_INTERVAL', 100);
         define('WP_REDIS_SELECTIVE_FLUSH', true);
         define('WP_REDIS_TIMEOUT', 1);
