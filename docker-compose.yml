@@ -1,3 +1,18 @@
+volumes:
+  db_data:
+  wordpress_data:
+  redis_data:
+  es_data:
+  nginx_cache:
+
+networks:
+  elastic:
+    driver: bridge
+    internal: true
+  redis:
+    driver: bridge
+    internal: true
+
 services:
   db:
     image: mariadb:11
@@ -8,14 +23,63 @@ services:
       MYSQL_PASSWORD: ${WORDPRESS_DB_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${WORDPRESS_DB_ROOT_PASSWORD}
     command: [
+      # Transaction and Isolation
       "--transaction-isolation=READ-COMMITTED",
       "--binlog-format=ROW",
       "--innodb-flush-log-at-trx-commit=1",
+      
+      # InnoDB Settings
       "--innodb-buffer-pool-size=512M",
+      "--innodb-buffer-pool-instances=4",
       "--innodb-log-file-size=256M",
+      "--innodb-log-buffer-size=64M",
+      "--innodb-file-per-table=1",
+      "--innodb-deadlock-detect=ON",
+      "--innodb-lock-wait-timeout=50",
+      "--innodb-thread-concurrency=16",
+      "--innodb-open-files=4000",
+      "--innodb-io-capacity=2000",
+      "--innodb-io-capacity-max=4000",
+      "--innodb-read-io-threads=4",
+      "--innodb-write-io-threads=4",
+      "--innodb-flush-method=O_DIRECT",
+      "--innodb-monitor-enable=all",
+      
+      # Query Cache (disabled for better performance)
+      "--query-cache-type=0",
+      "--query-cache-size=0",
+      
+      # Connection and Thread Settings
       "--max-allowed-packet=256M",
       "--max-connections=200",
-      "--table-open-cache=4000"
+      "--thread-cache-size=50",
+      "--thread-handling=pool-of-threads",
+      
+      # Table and Host Cache
+      "--table-open-cache=4000",
+      "--table-definition-cache=2000",
+      "--table-open-cache-instances=8",
+      "--host-cache-size=0",
+      
+      # Character Set
+      "--character-set-server=utf8mb4",
+      "--collation-server=utf8mb4_unicode_ci",
+      
+      # Temporary Tables
+      "--tmp-table-size=64M",
+      "--max-heap-table-size=64M",
+      
+      # Sort Buffer
+      "--sort-buffer-size=8M",
+      "--join-buffer-size=8M",
+      "--read-buffer-size=2M",
+      "--read-rnd-buffer-size=4M",
+      
+      # Other Optimizations
+      "--key-buffer-size=64M",
+      "--performance-schema=ON",
+      "--skip-name-resolve",
+      "--sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION"
     ]
     volumes:
       - db_data:/var/lib/mysql
@@ -25,18 +89,50 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 512m
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    networks:
+      - default
+      - redis
 
   redis:
     image: redis:8-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--tcp-keepalive", "60", "--hz", "10", "--activedefrag", "yes"]
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     volumes:
       - redis_data:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-changeme}
+    sysctls:
+      net.core.somaxconn: 1024
+      vm.overcommit_memory: 1
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 10
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+        reservations:
+          memory: 256m
+    networks:
+      - redis
 
   wordpress:
     build:
@@ -53,20 +149,64 @@ services:
       WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
       WORDPRESS_CONFIG_EXTRA: |
+        # Redis Configuration
         define('WP_REDIS_HOST', 'redis');
         define('WP_REDIS_PORT', 6379);
+        define('WP_REDIS_PASSWORD', '${REDIS_PASSWORD}');
         define('WP_CACHE', true);
         define('WP_REDIS_DISABLED', false);
         define('WP_CACHE_KEY_SALT', 'the-town-project:');
         define('WP_REDIS_PREFIX', 'wp:');
         define('WP_REDIS_COMPRESSION', 'lz4');
+        define('WP_REDIS_RETRY_INTERVAL', 100);
+        define('WP_REDIS_SELECTIVE_FLUSH', true);
+        define('WP_REDIS_TIMEOUT', 1);
+        define('WP_REDIS_READ_TIMEOUT', 1);
+        define('WP_REDIS_DATABASE', 0);
+        define('WP_REDIS_MAXTTL', 86400);
+        define('WP_REDIS_CONNECTION_RETRIES', 3);
+        define('WP_REDIS_BACKOFF_ALGORITHM', 'exponential');
+        define('WP_REDIS_SERIALIZER', 'igbinary');
+
+        # WooCommerce Redis Settings
+        define('WP_REDIS_WOOCOMMERCE_CART_CACHE_TIME', 7200);
+        define('WP_REDIS_WOOCOMMERCE_SESSION_CACHE_TIME', 86400);
+        define('WP_REDIS_IGNORED_GROUPS', ['counts', 'plugins', 'wc_session_id']);
+        define('WP_REDIS_USE_CACHE_GROUPS', true);
+        define('WOOCOMMERCE_CACHE_TIMEOUT', 3600);
+
+        # Performance Optimizations
         define('DISABLE_WP_CRON', true);
         define('WP_MEMORY_LIMIT', '256M');
         define('WP_MAX_MEMORY_LIMIT', '512M');
         define('WP_POST_REVISIONS', 10);
         define('AUTOSAVE_INTERVAL', 120);
+        define('EMPTY_TRASH_DAYS', 7);
+        define('MEDIA_TRASH', true);
+        define('CONCATENATE_SCRIPTS', true);
+        define('COMPRESS_SCRIPTS', true);
+        define('COMPRESS_CSS', true);
+        define('ENFORCE_GZIP', true);
+        define('WP_DEBUG', false);
+        define('WP_DEBUG_DISPLAY', false);
+        define('SCRIPT_DEBUG', false);
+        define('SAVEQUERIES', false);
+
+        # Database Optimizations
+        define('DB_CHARSET', 'utf8mb4');
+        define('DB_COLLATE', 'utf8mb4_unicode_ci');
+
+        # WooCommerce Optimizations
+        define('WOOCOMMERCE_CART_CACHE_KEY', 'wc_cart_hash');
+        define('WC_CACHE_CART_FRAGMENTS', true);
+        define('WC_PRICES_INCLUDE_TAX', 'yes');
+        define('WC_ROUNDS_TAX_AFTER_COUPON', 'yes');
+        define('WC_LOAD_CART_FRAGMENTS', true);
+
+        # Session Handling
         ini_set('session.save_handler', 'redis');
         ini_set('session.save_path', 'tcp://redis:6379');
+        ini_set('session.gc_maxlifetime', 86400);
     volumes:
       - wordpress_data:/var/www/html
       - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
@@ -81,6 +221,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
     ulimits:
       nofile:
         soft: 65535
@@ -90,9 +236,15 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    networks:
+      - default
+      - redis
+      - elastic
 
   nginx:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
     depends_on:
       wordpress:
         condition: service_healthy
@@ -103,28 +255,40 @@ services:
       - ./default.conf:/etc/nginx/conf.d/default.conf:ro
       - nginx_cache:/var/cache/nginx
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ping >/dev/null 2>&1 || exit 1"]
-    interval: 10s
-    timeout: 5s
-    retries: 5
-    start_period: 20s
     ulimits:
+      nproc: 65535
       nofile:
         soft: 65535
         hard: 65535
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ping >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+        reservations:
+          memory: 128m
     logging:
       driver: json-file
       options:
         max-size: "10m"
         max-file: "3"
+    networks:
+      - default
+      - redis
 
   wp-cli:
     image: wordpress:cli-php8.4
     depends_on:
-      - db
-      - wordpress
+      db:
+        condition: service_healthy
+      wordpress:
+        condition: service_healthy
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
@@ -133,14 +297,26 @@ services:
     volumes:
       - wordpress_data:/var/www/html
       - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
-    entrypoint: ["sh", "-c"]
-    command: ["tail -f /dev/null"]
+    profiles: ["cli"]
+    entrypoint: ["wp"]
+    working_dir: /var/www/html
+    networks:
+      - default
+      - redis
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 128m
 
   wp-cron:
     image: wordpress:cli-php8.4
     depends_on:
-      - db
-      - wordpress
+      db:
+        condition: service_healthy
+      wordpress:
+        condition: service_healthy
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
@@ -151,24 +327,66 @@ services:
     command: |
       sh -c "while :; do wp cron event run --due-now --path=/var/www/html; sleep 60; done"
     restart: unless-stopped
+    networks:
+      - default
+      - redis
+      - elastic
+    healthcheck:
+      test: ["CMD-SHELL", "wp core is-installed --path=/var/www/html || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+        reservations:
+          memory: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   elasticsearch:
     image: elasticsearch:9.2.0
     environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - node.name=wp-search-node
+      - cluster.name=wp-search
+      - bootstrap.memory_lock=true
       - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - xpack.security.enabled=true
+      - xpack.monitoring.collection.enabled=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m -XX:+UseG1GC -XX:G1HeapRegionSize=4m -XX:+ParallelRefProcEnabled -XX:+AlwaysPreTouch -XX:MaxGCPauseMillis=50"
+      - "OPENSEARCH_JAVA_HOME=/usr/share/elasticsearch/jdk"
+      - "ES_GCLOG_INCLUDE_TIMESTAMP=true"
+      - "ES_GC_LOG_FILE=/var/log/elasticsearch/gc.log"
     ulimits:
       memlock:
         soft: -1
         hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       - es_data:/usr/share/elasticsearch/data
+      - ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    networks:
+      - elastic
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=50s", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 512m
     restart: unless-stopped
-
-volumes:
-  db_data:
-  wordpress_data:
-  redis_data:
-  es_data:
-  nginx_cache:
+    expose:
+      - "9200"
+      - "9300"
