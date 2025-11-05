@@ -20,7 +20,7 @@ services:
     volumes:
       - db_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-p$$MARIADB_ROOT_PASSWORD"]
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -29,7 +29,7 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru", "--tcp-keepalive", "60", "--hz", "10", "--activedefrag", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:
@@ -57,13 +57,68 @@ services:
         define('WP_REDIS_PORT', 6379);
         define('WP_CACHE', true);
         define('WP_REDIS_DISABLED', false);
+        define('WP_CACHE_KEY_SALT', 'the-town-project:');
+        define('WP_REDIS_PREFIX', 'wp:');
+        define('WP_REDIS_COMPRESSION', 'lz4');
         define('DISABLE_WP_CRON', true);
         define('WP_MEMORY_LIMIT', '256M');
         define('WP_MAX_MEMORY_LIMIT', '512M');
+        define('WP_POST_REVISIONS', 10);
+        define('AUTOSAVE_INTERVAL', 120);
+        ini_set('session.save_handler', 'redis');
+        ini_set('session.save_path', 'tcp://redis:6379');
     volumes:
       - wordpress_data:/var/www/html
-      - /Users/meow/Sites/thetownproject/goddamnit/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+      - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+      - ./php-performance.ini:/usr/local/etc/php/conf.d/zz-performance.ini:ro
+      - ./php-fpm-www.conf:/usr/local/etc/php-fpm.d/zzz-www.conf:ro
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "php -m >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:alpine
+    depends_on:
+      wordpress:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    volumes:
+      - wordpress_data:/var/www/html:ro
+      - ./default.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx_cache:/var/cache/nginx
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ping >/dev/null 2>&1 || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   wp-cli:
     image: wordpress:cli-php8.4
@@ -77,7 +132,7 @@ services:
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
     volumes:
       - wordpress_data:/var/www/html
-      - /Users/meow/Sites/thetownproject/goddamnit/uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
+      - ./uploads.ini:/usr/local/etc/php/conf.d/uploads.ini:ro
     entrypoint: ["sh", "-c"]
     command: ["tail -f /dev/null"]
 
@@ -94,11 +149,11 @@ services:
     volumes:
       - wordpress_data:/var/www/html
     command: |
-      sh -c "echo '* * * * * wp cron event run --due-now --path=/var/www/html' | crontab - && crond -f -L /dev/stdout"
+      sh -c "while :; do wp cron event run --due-now --path=/var/www/html; sleep 60; done"
     restart: unless-stopped
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:9.2.0
+    image: elasticsearch:9.2.0
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
@@ -110,15 +165,10 @@ services:
     volumes:
       - es_data:/usr/share/elasticsearch/data
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health > /dev/null || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
 
 volumes:
   db_data:
   wordpress_data:
   redis_data:
   es_data:
+  nginx_cache:
