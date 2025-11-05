@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+
+FROM wordpress:6-php8.4-apache
+
+# Install PHP Redis extension for object caching
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        libzip4 \
+        libzstd1 \
+        libssl-dev \
+        pkg-config \
+        git \
+        unzip; \
+    rm -rf /var/lib/apt/lists/*; \
+    pecl install redis; \
+    docker-php-ext-enable redis; \
+    php -m | grep -i redis
+
+# Keep opcache enabled (comes with the base image) and allow custom ini mounts
+
+
