@@ -4,7 +4,7 @@ FROM wordpress:6-php8.4-fpm
 
 # Install system dependencies and PHP extensions
 RUN set -eux; \
-    # Install required system packages
+    # Install required system packages and build dependencies
     apt-get update; \
     apt-get install -y --no-install-recommends \
         libzip-dev \
@@ -12,9 +12,11 @@ RUN set -eux; \
         libzstd-dev \
         liblz4-1 \
         libzstd1 \
-        $PHPIZE_DEPS; \
+        $PHPIZE_DEPS \
+        pkg-config; \
     \
     # Install igbinary first (required for Redis)
+    pecl channel-update pecl.php.net; \
     pecl install igbinary; \
     docker-php-ext-enable igbinary; \
     \
@@ -22,18 +24,26 @@ RUN set -eux; \
     pecl install --configureoptions 'enable-redis-igbinary="yes"' redis; \
     docker-php-ext-enable redis; \
     \
-    # Install LZ4 and Zstd
-    pecl install lz4-0.4.3 zstd-stable; \
-    docker-php-ext-enable lz4 zstd; \
+    # Install LZ4 and Zstd with specific configurations
+    pecl install lz4-0.4.3; \
+    docker-php-ext-enable lz4; \
+    \
+    pecl install zstd; \
+    docker-php-ext-enable zstd; \
     \
     # Install additional PHP extensions
     docker-php-ext-install -j$(nproc) \
         opcache \
         zip; \
     \
-    # Cleanup
+    # Cleanup but keep runtime dependencies
     pecl clear-cache; \
-    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false $PHPIZE_DEPS; \
+    apt-mark auto $PHPIZE_DEPS pkg-config; \
+    apt-mark manual \
+        libzip4 \
+        liblz4-1 \
+        libzstd1; \
+    apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
     rm -rf /var/lib/apt/lists/*; \
     \
     # Verify installations
