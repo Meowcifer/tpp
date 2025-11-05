@@ -16,6 +16,16 @@ RUN apk add --no-cache \
     gd-dev \
     geoip-dev
 
+# Create nginx directories
+RUN mkdir -p /var/cache/nginx/client_temp \
+    && mkdir -p /var/cache/nginx/proxy_temp \
+    && mkdir -p /var/cache/nginx/fastcgi_temp \
+    && mkdir -p /var/cache/nginx/uwsgi_temp \
+    && mkdir -p /var/cache/nginx/scgi_temp \
+    && mkdir -p /usr/lib/nginx/modules \
+    && mkdir -p /var/log/nginx \
+    && mkdir -p /etc/nginx
+
 # Download and compile Brotli
 RUN cd /tmp && \
     git clone --depth 1 https://github.com/google/ngx_brotli.git && \
@@ -76,46 +86,46 @@ RUN cd /tmp && \
 # Create final lightweight image
 FROM alpine:latest
 
-# Install runtime dependencies
+# Install runtime dependencies and create system user
 RUN apk add --no-cache \
     ca-certificates \
     pcre \
     openssl \
     tzdata \
     && addgroup -S nginx \
-    && adduser -D -S -h /var/cache/nginx -s /sbin/nologin -G nginx nginx \
-    && mkdir -p /var/log/nginx \
-    && mkdir -p /var/cache/nginx \
-    && mkdir -p /var/cache/nginx/client_temp \
+    && adduser -D -S -h /var/cache/nginx -s /sbin/nologin -G nginx nginx
+
+# Create necessary directories with proper ownership
+RUN mkdir -p /var/cache/nginx/client_temp \
     && mkdir -p /var/cache/nginx/proxy_temp \
     && mkdir -p /var/cache/nginx/fastcgi_temp \
     && mkdir -p /var/cache/nginx/uwsgi_temp \
     && mkdir -p /var/cache/nginx/scgi_temp \
     && mkdir -p /usr/lib/nginx/modules \
-    && chown -R nginx:nginx /var/cache/nginx /var/log/nginx
+    && mkdir -p /var/log/nginx \
+    && mkdir -p /etc/nginx \
+    && chown -R nginx:nginx /var/cache/nginx \
+    && chown -R nginx:nginx /var/log/nginx \
+    && touch /var/run/nginx.pid \
+    && chown -R nginx:nginx /var/run/nginx.pid
 
 # Copy Nginx from builder
 COPY --from=builder /usr/sbin/nginx /usr/sbin/nginx
 COPY --from=builder /etc/nginx /etc/nginx
 COPY --from=builder /usr/lib/nginx/modules/*.so /usr/lib/nginx/modules/
-COPY --from=builder /var/cache/nginx /var/cache/nginx
 
-# Forward request logs to Docker log collector
+# Forward request logs to Docker log collector and set permissions
 RUN ln -sf /dev/stdout /var/log/nginx/access.log \
     && ln -sf /dev/stderr /var/log/nginx/error.log \
-    && chown -R nginx:nginx /usr/lib/nginx/modules
+    && chmod -R 755 /usr/lib/nginx/modules \
+    && chmod 755 /usr/sbin/nginx \
+    && chown -R nginx:nginx /usr/lib/nginx/modules \
+    && chown -R nginx:nginx /var/cache/nginx
 
 STOPSIGNAL SIGQUIT
-
-# Set correct permissions
-RUN chmod -R 755 /usr/lib/nginx/modules \
-    && chmod 755 /usr/sbin/nginx
 
 EXPOSE 80 443
 
-CMD ["nginx", "-g", "daemon off;"]
-
-# Use SIGQUIT instead of default SIGTERM
-STOPSIGNAL SIGQUIT
+USER nginx
 
 CMD ["nginx", "-g", "daemon off;"]
