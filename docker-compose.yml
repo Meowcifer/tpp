@@ -67,12 +67,12 @@ services:
       ]
     volumes:
       - db_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+#    healthcheck:
+#      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u", "root", "-p$$MYSQL_ROOT_PASSWORD"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#      start_period: 30s
     deploy:
       resources:
         limits:
@@ -119,9 +119,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.wordpress
-    depends_on:
-      db:
-        condition: service_healthy
+#    depends_on:
+#      db:
+#        condition: service_healthy
 #      redis:
 #        condition: service_healthy
     environment:
@@ -184,12 +184,12 @@ services:
     tmpfs:
       - /tmp:size=64m,noexec,nosuid,nodev
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9000/status || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+#    healthcheck:
+#      test: ["CMD-SHELL", "curl -f http://localhost:9000/status || exit 1"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#      start_period: 30s
     deploy:
       resources:
         limits:
@@ -214,9 +214,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.nginx
-    depends_on:
-      wordpress:
-        condition: service_healthy
+#    depends_on:
+#      wordpress:
+#        condition: service_healthy
     ports:
       - "8080:80"
     volumes:
@@ -230,12 +230,12 @@ services:
         soft: 65535
         hard: 65535
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ping >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+#    healthcheck:
+#      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ping >/dev/null 2>&1 || exit 1"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#      start_period: 20s
     deploy:
       resources:
         limits:
@@ -253,11 +253,11 @@ services:
 
   wp-cli:
     image: wordpress:cli-php8.4
-    depends_on:
-      db:
-        condition: service_healthy
-      wordpress:
-        condition: service_healthy
+#    depends_on:
+#      db:
+#        condition: service_healthy
+#      wordpress:
+#        condition: service_healthy
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
@@ -281,11 +281,11 @@ services:
 
   wp-cron:
     image: wordpress:cli-php8.4
-    depends_on:
-      db:
-        condition: service_healthy
-      wordpress:
-        condition: service_healthy
+#    depends_on:
+#      db:
+#        condition: service_healthy
+#      wordpress:
+#        condition: service_healthy
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
@@ -300,11 +300,11 @@ services:
       - default
       - redis
       - elastic
-    healthcheck:
-      test: ["CMD-SHELL", "wp core is-installed --path=/var/www/html || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+#    healthcheck:
+#      test: ["CMD-SHELL", "wp core is-installed --path=/var/www/html || exit 1"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
     deploy:
       resources:
         limits:
@@ -343,12 +343,12 @@ services:
       - ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
     networks:
       - elastic
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=50s", "||", "exit", "1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=50s", "||", "exit", "1"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 5
+#      start_period: 30s
     deploy:
       resources:
         limits:
