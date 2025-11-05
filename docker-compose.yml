@@ -141,7 +141,7 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       WORDPRESS_DB_HOST: db:3306
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
@@ -215,7 +215,7 @@ services:
       - /tmp:size=64m,noexec,nosuid,nodev
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "php -m >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9000/status || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
